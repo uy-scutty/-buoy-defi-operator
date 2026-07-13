@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# env files — NEVER commit these
+.env
+.env.*
+!.env.example
+
+# build outputs
+.next/
+out/
+dist/
+build/
+
+# foundry
+contracts/cache/
+contracts/out/
+contracts/broadcast/*/31337/
+contracts/broadcast/**/dry-run/
+
+# misc
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+
+contracts/lib/

@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique
+  smartAccount  String?
+  createdAt     DateTime @default(now())
+  analyses      Analysis[]
+}
+
+model Agent {
+  id            String   @id @default(cuid())
+  name          String
+  description   String
+  walletAddress String?
+  capabilities  String   // JSON-encoded string array
+  metadata      String   // JSON-encoded object
+  createdAt     DateTime @default(now())
+}
+
+model Analysis {
+  id                   String   @id @default(cuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id])
+
+  totalCollateral      Float
+  totalDebt            Float
+  healthFactor         Float
+  loanToValue          Float
+  liquidationThreshold Float
+
+  riskSummary          String
+  researchSummary      String
+  explanation          String
+  recommendedAction    String
+  actionRationale      String
+
+  preparedUserOp       String
+  status               String   @default("PREPARED")
+  txHash               String?
+
+  createdAt            DateTime @default(now())
+
+  @@index([userId])
+}
