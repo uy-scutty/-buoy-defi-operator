@@ -7,7 +7,6 @@ import {EntryPoint} from "account-abstraction/core/EntryPoint.sol";
 import {SentinelAccountFactory} from "../src/SentinelAccountFactory.sol";
 import {SentinelSmartAccount} from "../src/SentinelSmartAccount.sol";
 
-
 contract SentinelAccountFactoryTest is Test {
     EntryPoint entryPoint;
     SentinelAccountFactory factory;

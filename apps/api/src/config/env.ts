@@ -13,7 +13,8 @@ const envSchema = z.object({
     XLAYER_TESTNET_RPC: z.string().url(),
     MOCK_AAVE_POOL_ADDRESS: z.string().optional(),
     SENTINEL_ACCOUNT_FACTORY_ADDRESS: z.string().optional(),
-    OPENAI_API_KEY: z.string().optional(),
+    BUOY_VAULT_ADDRESS: z.string().optional(),
+    AUTOMATION_PRIVATE_KEY: z.string().optional(),
     GEMINI_API_KEY: z.string().optional(),
     DATABASE_URL: z.string(),
 });

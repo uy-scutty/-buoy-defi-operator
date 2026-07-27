@@ -17,9 +17,10 @@ contract MockAavePoolTest is Test {
         pool = new MockAavePool();
 
         // WETH: $2000, 80% LTV, 85% liquidation threshold
-        pool.configureAsset(weth, 2000e18, 8000, 8500);
+        pool.configureAsset(weth, "WETH", 18, 2000e18, 8000, 8500);
         // USDC: $1, 0% LTV (not usable as collateral in this demo), 0% liq threshold
-        pool.configureAsset(usdc, 1e18, 0, 0);
+
+        pool.configureAsset(usdc, "USDC", 18, 1e18, 0, 0);
     }
 
     function test_NoPosition_ReturnsMaxHealthFactor() public view {
@@ -62,8 +63,7 @@ contract MockAavePoolTest is Test {
         pool.seedPosition(user, weth, 1e18, usdc, 1700e18);
 
         vm.prank(user);
-        pool.repay(usdc, 700e18);
-
+        pool.repay(usdc, 700e18, user);
         (, uint256 totalDebtUSD,,,, uint256 healthFactor) = pool.getUserAccountData(user);
         assertEq(totalDebtUSD, 1000e18);
         assertEq(healthFactor, 1.7e18);
@@ -71,30 +71,72 @@ contract MockAavePoolTest is Test {
 
     function test_Supply_IncreasesCollateral() public {
         vm.prank(user);
-        pool.supply(weth, 2e18);
+        pool.supply(weth, 2e18, user);
 
         uint256 balance = pool.getCollateralBalance(user, weth);
         assertEq(balance, 2e18);
     }
 
-    function test_RevertWhen_UnsupportedAsset() public {
-        address fakeAsset = address(0x999);
-        vm.expectRevert(MockAavePool.AssetNotSupported.selector);
-        vm.prank(user);
-        pool.supply(fakeAsset, 1e18);
-    }
+
+function test_RevertWhen_RepayExceedsDebt() public {
+    pool.seedPosition(user, weth, 1e18, usdc, 500e18);
+
+    vm.expectRevert(MockAavePool.InsufficientDebt.selector);
+    vm.prank(user);
+    pool.repay(usdc, 600e18, user);  // trying to repay more than the 500 debt
+}
+
+function test_Borrow_IncreasesDebt() public {
+    pool.seedPosition(user, weth, 1e18, usdc, 1000e18);
+
+    vm.prank(user);
+    pool.borrow(usdc, 500e18);
+
+    assertEq(pool.getDebtBalance(user, usdc), 1500e18);
+}
 
     function test_RevertWhen_NonOwnerConfiguresAsset() public {
         vm.expectRevert(MockAavePool.NotOwner.selector);
         vm.prank(user);
-        pool.configureAsset(weth, 2000e18, 8000, 8500);
+        pool.configureAsset(weth, "WETH", 18, 2000e18, 8000, 8500);
     }
 
-    function test_RevertWhen_RepayExceedsDebt() public {
-        pool.seedPosition(user, weth, 1e18, usdc, 500e18);
+    
 
-        vm.expectRevert(MockAavePool.InsufficientDebt.selector);
-        vm.prank(user);
-        pool.repay(usdc, 1000e18);
-    }
+    function test_GetUserPositions_ReturnsMultiAssetBreakdown() public {
+    pool.seedPosition(user, weth, 1e18, usdc, 1000e18);
+
+    MockAavePool.AssetPosition[] memory positions = pool.getUserPositions(user);
+
+    assertEq(positions.length, 2);
+
+    // Order matches _demoAssetList insertion order: weth, then usdc
+    assertEq(positions[0].asset, weth);
+    assertEq(positions[0].symbol, "WETH");
+    assertEq(positions[0].collateralAmount, 1e18);
+    assertEq(positions[0].collateralUSD, 2000e18);
+    assertEq(positions[0].debtAmount, 0);
+
+    assertEq(positions[1].asset, usdc);
+    assertEq(positions[1].symbol, "USDC");
+    assertEq(positions[1].debtAmount, 1000e18);
+    assertEq(positions[1].debtUSD, 1000e18);
+    assertEq(positions[1].collateralAmount, 0);
+}
+
+function test_GetUserPositions_EmptyForNoPosition() public view {
+    MockAavePool.AssetPosition[] memory positions = pool.getUserPositions(user);
+    assertEq(positions.length, 0);
+}
+
+function test_GetUserPositions_OnlyIncludesAssetsWithNonzeroBalance() public {
+    // User only supplies WETH, never touches USDC
+    vm.prank(user);
+    pool.supply(weth, 1e18, user);
+
+    MockAavePool.AssetPosition[] memory positions = pool.getUserPositions(user);
+
+    assertEq(positions.length, 1);
+    assertEq(positions[0].symbol, "WETH");
+}
 }

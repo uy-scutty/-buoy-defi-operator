@@ -1,60 +1,67 @@
-import { getPosition, PositionData } from "../position.service";
+import { ethers } from "ethers";
+import { provider } from "../../config/chain";
+import { env } from "../../config/env";
+import mockAavePoolAbi from "../../config/abi/MockAavePool.json";
+import { discoverPosition, DiscoveredPosition, AssetPosition } from "../positionDiscovery.service";
 
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 export interface RiskOutput {
+    collateralAssets: AssetPosition[];
+    debtAssets: AssetPosition[];
     totalCollateralUSD: number;
     totalDebtUSD: number;
-    availableBorrowsUSD: number;
-    liquidationThresholdPct: number; // e.g. 85 for 85%
-    ltvPct: number;                   // e.g. 80 for 80%
-    healthFactor: number | null;      // null represents "infinite" (no debt)
+    ltvPct: number; // weighted average across whatever collateral assets exist
+    liquidationThresholdPct: number; // weighted average, from the pool's own calculation
+    healthFactor: number | null;
     riskLevel: RiskLevel;
 }
 
-const USD_SCALE = 1e18;
-const BPS_SCALE = 100; // basis points -> percentage (divide by 100, not 10000, since bps/100 = %)
 const HF_SCALE = 1e18;
+const BPS_SCALE = 100;
 
-/**
- * Risk Agent: computes Health Factor, LTV, Liquidation Threshold, Total
- * Collateral, and Total Debt from raw on-chain position data, and derives
- * a plain risk label. No LLM call happens here — this is pure, deterministic
- * math, matching the architecture doc's separation of Risk Agent from the
- * Supervisor's plain-English synthesis step.
- */
 export async function runRiskAgent(walletAddress: string): Promise<RiskOutput> {
-    const position: PositionData = await getPosition(walletAddress);
-
-    const totalCollateralUSD = Number(position.totalCollateralUSD) / USD_SCALE;
-    const totalDebtUSD = Number(position.totalDebtUSD) / USD_SCALE;
-    const availableBorrowsUSD = Number(position.availableBorrowsUSD) / USD_SCALE;
-    const liquidationThresholdPct = Number(position.currentLiquidationThreshold) / BPS_SCALE;
-    const ltvPct = Number(position.ltv) / BPS_SCALE;
-
-    const isMaxUint = position.healthFactor === ethersMaxUint256String();
-    const healthFactor = isMaxUint ? null : Number(position.healthFactor) / HF_SCALE;
+    const position: DiscoveredPosition = await discoverPosition(walletAddress);
+    const { healthFactor, ltvPct, liquidationThresholdPct } = await fetchAccountData(walletAddress);
 
     return {
-        totalCollateralUSD,
-        totalDebtUSD,
-        availableBorrowsUSD,
-        liquidationThresholdPct,
+        collateralAssets: position.collateralAssets,
+        debtAssets: position.debtAssets,
+        totalCollateralUSD: position.totalCollateralUSD,
+        totalDebtUSD: position.totalDebtUSD,
         ltvPct,
+        liquidationThresholdPct,
         healthFactor,
         riskLevel: deriveRiskLevel(healthFactor),
     };
 }
 
+async function fetchAccountData(walletAddress: string): Promise<{
+    healthFactor: number | null;
+    ltvPct: number;
+    liquidationThresholdPct: number;
+}> {
+    if (!env.MOCK_AAVE_POOL_ADDRESS) {
+        throw new Error("MOCK_AAVE_POOL_ADDRESS is not configured — deploy contracts first");
+    }
+
+    const pool = new ethers.Contract(env.MOCK_AAVE_POOL_ADDRESS, mockAavePoolAbi as any, provider);
+    const result = await pool.getUserAccountData(walletAddress);
+
+    const rawHealthFactor: bigint = result[5];
+    const isMaxUint = rawHealthFactor === ethers.MaxUint256;
+
+    return {
+        healthFactor: isMaxUint ? null : Number(rawHealthFactor) / HF_SCALE,
+        liquidationThresholdPct: Number(result[3]) / BPS_SCALE,
+        ltvPct: Number(result[4]) / BPS_SCALE,
+    };
+}
+
 function deriveRiskLevel(healthFactor: number | null): RiskLevel {
-    if (healthFactor === null) return "LOW"; // no debt at all
+    if (healthFactor === null) return "LOW";
     if (healthFactor >= 2.0) return "LOW";
     if (healthFactor >= 1.5) return "MEDIUM";
     if (healthFactor >= 1.1) return "HIGH";
-    return "CRITICAL"; // at or below 1.1 — near or at liquidation
-}
-
-/** Returns type(uint256).max as a string, matching MockAavePool's "no debt" convention. */
-function ethersMaxUint256String(): string {
-    return "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+    return "CRITICAL";
 }

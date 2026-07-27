@@ -15,8 +15,10 @@ contract AgentRegistryTest is Test {
     }
 
     function test_RegisterAgent_AssignsSequentialIds() public {
-        uint256 id1 = registry.registerAgent("Risk Agent", "Computes risk metrics", agentWallet, "ipfs://caps1", "ipfs://meta1");
-        uint256 id2 = registry.registerAgent("Research Agent", "Gathers context", agentWallet, "ipfs://caps2", "ipfs://meta2");
+        uint256 id1 =
+            registry.registerAgent("Risk Agent", "Computes risk metrics", agentWallet, "ipfs://caps1", "ipfs://meta1");
+        uint256 id2 =
+            registry.registerAgent("Research Agent", "Gathers context", agentWallet, "ipfs://caps2", "ipfs://meta2");
 
         assertEq(id1, 1);
         assertEq(id2, 2);
@@ -25,11 +27,7 @@ contract AgentRegistryTest is Test {
 
     function test_GetAgent_ReturnsCorrectData() public {
         uint256 id = registry.registerAgent(
-            "Supervisor Agent",
-            "Coordinates the system",
-            agentWallet,
-            "ipfs://caps",
-            "ipfs://meta"
+            "Supervisor Agent", "Coordinates the system", agentWallet, "ipfs://caps", "ipfs://meta"
         );
 
         AgentRegistry.AgentInfo memory agent = registry.getAgent(id);

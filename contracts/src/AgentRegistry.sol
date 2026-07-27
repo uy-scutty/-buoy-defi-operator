@@ -18,7 +18,7 @@ contract AgentRegistry {
         string description;
         address wallet;
         string capabilitiesURI; // pointer to off-chain JSON (capabilities list)
-        string metadataURI;     // pointer to off-chain JSON (free-form metadata)
+        string metadataURI; // pointer to off-chain JSON (free-form metadata)
         bool active;
     }
 
@@ -27,11 +27,7 @@ contract AgentRegistry {
 
     mapping(uint256 => AgentInfo) private _agents;
 
-    event AgentRegistered(
-        uint256 indexed agentId,
-        string name,
-        address indexed wallet
-    );
+    event AgentRegistered(uint256 indexed agentId, string name, address indexed wallet);
     event AgentUpdated(uint256 indexed agentId);
     event AgentDeactivated(uint256 indexed agentId);
 
@@ -73,12 +69,10 @@ contract AgentRegistry {
     }
 
     /// @notice Updates an existing agent's mutable fields (wallet, capabilities, metadata).
-    function updateAgent(
-        uint256 agentId,
-        address wallet,
-        string calldata capabilitiesURI,
-        string calldata metadataURI
-    ) external onlyOwner {
+    function updateAgent(uint256 agentId, address wallet, string calldata capabilitiesURI, string calldata metadataURI)
+        external
+        onlyOwner
+    {
         AgentInfo storage agent = _agents[agentId];
         if (agent.id == 0) revert AgentNotFound();
 

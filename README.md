@@ -60,3 +60,9 @@ npm run dev
 - **`MockAavePool` is an original implementation**, not a copy of Aave's BUSL-1.1-licensed code — it matches Aave V3's `getUserAccountData` interface shape so the adapter can point at the real Aave V3 Pool on X Layer mainnet (live with $23B+ TVL) with a one-line config change.
 - **No bundler integration** — transactions are prepared and signed by the user, stopping short of live submission to an ERC-4337 bundler. A deliberate scope decision for demo reliability within the hackathon timeline.
 - **`AgentRegistry` is ERC-8004-inspired, not ERC-8004-compliant** — the standard is still evolving; our registry matches its converging field shape behind a swappable interface.
+
+
+MockAavePool: 0x6fb523D2c68a1CFE1C9Cbc29191dEBFAEdd5C4e5
+SentinelAccountFactory: 0x11798539b8f8544D461db9782BDd7ba4b6847f05
+AgentRegistry: 0x1077D5303E53c9E10B6dbE28b8DB1984E507ED6c
+BuoyVault: 0x4F4FB9eea768c07C5A0d7C53EdC291014d87B9B0

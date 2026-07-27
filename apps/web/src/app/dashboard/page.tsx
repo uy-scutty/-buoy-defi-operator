@@ -1,15 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { runAnalysis, getDeployAccountInfo, AnalysisResult, DeployAccountInfo } from "@/lib/api";
-import { useAccount, useConnect, useChainId, useSwitchChain, useSendTransaction, useWaitForTransactionReceipt } from "wagmi";
+import Link from "next/link";
+import { motion } from "framer-motion";
+import { useAccount, useConnect, useChainId, useSwitchChain } from "wagmi";
 import { xLayerTestnet } from "@/lib/wagmi";
-import { AgentStatusStrip } from "@/components/AgentStatusStrip";
-import { ExecutionPreview } from "@/components/ExecutionPreview";
-
-export const dynamic = "force-dynamic";
-
-type Stage = "checking-account" | "needs-deploy" | "deploying" | "confirming" | "analyzing" | "done";
+import { runAnalysis, AnalysisResult } from "@/lib/api";
+import { AssetRow } from "@/components/AssetRow";
+import { RiskGauge } from "@/components/RiskGauge";
 
 export default function Dashboard() {
     const [mounted, setMounted] = useState(false);
@@ -19,62 +17,22 @@ export default function Dashboard() {
     const chainId = useChainId();
     const { switchChain, isPending: isSwitching } = useSwitchChain();
     const { connect, connectors, error: connectError } = useConnect();
-    const { sendTransaction, data: txHash, isPending: isSending, error: sendError } = useSendTransaction();
-    const { isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash: txHash });
 
-    const [stage, setStage] = useState<Stage>("checking-account");
-    const [accountInfo, setAccountInfo] = useState<DeployAccountInfo | null>(null);
     const [result, setResult] = useState<AnalysisResult | null>(null);
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Step 1: check whether the smart account already exists
     useEffect(() => {
         if (!isConnected || !address || chainId !== xLayerTestnet.id) return;
 
-        setStage("checking-account");
+        setLoading(true);
         setError(null);
 
-        getDeployAccountInfo(address)
-            .then((info) => {
-                setAccountInfo(info);
-                setStage(info.alreadyDeployed ? "analyzing" : "needs-deploy");
-            })
-            .catch((err) => setError(err.message));
-    }, [isConnected, address, chainId]);
-
-    // Step 2: once the deploy transaction confirms, re-check deployment status
-    useEffect(() => {
-        if (!isConfirmed || !address) return;
-
-        setStage("confirming");
-        getDeployAccountInfo(address)
-            .then((info) => {
-                setAccountInfo(info);
-                setStage("analyzing");
-            })
-            .catch((err) => setError(err.message));
-    }, [isConfirmed, address]);
-
-    // Step 3: run the analysis once we know the account state
-    useEffect(() => {
-        if (stage !== "analyzing" || !address) return;
-
         runAnalysis(address)
-            .then((res) => {
-                setResult(res);
-                setStage("done");
-            })
-            .catch((err) => setError(err.message));
-    }, [stage, address]);
-
-    function handleDeploy() {
-        if (!accountInfo) return;
-        setStage("deploying");
-        sendTransaction({
-            to: accountInfo.factoryAddress as `0x${string}`,
-            data: accountInfo.factoryCallData as `0x${string}`,
-        });
-    }
+            .then(setResult)
+            .catch((err) => setError(err.message))
+            .finally(() => setLoading(false));
+    }, [isConnected, address, chainId]);
 
     if (!mounted) {
         return (
@@ -87,16 +45,15 @@ export default function Dashboard() {
     if (!isConnected) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center gap-4">
-                <p className="text-text-secondary">Please connect your wallet first.</p>
+                <p className="text-text-secondary">Connect your wallet to see your position.</p>
                 <button
                     onClick={() => connect({ connector: connectors[0] })}
-                    className="font-sans font-medium bg-risk-low text-background px-6 py-2 rounded-full hover:opacity-90 transition-opacity"
+                    className="font-sans font-bold px-6 py-2 rounded-full"
+                    style={{ backgroundColor: "var(--brand-cyan)", color: "#0B0620" }}
                 >
-                    Connect Wallet
+                    Connect wallet
                 </button>
-                {connectError && (
-                    <p className="text-risk-critical text-sm font-mono mt-2 max-w-md text-center">{connectError.message}</p>
-                )}
+                {connectError && <p className="text-risk-critical text-sm font-mono">{connectError.message}</p>}
             </div>
         );
     }
@@ -104,17 +61,26 @@ export default function Dashboard() {
     if (chainId !== xLayerTestnet.id) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6">
-                <p className="text-risk-medium font-medium">Wrong network</p>
+                <p style={{ color: "var(--risk-medium)" }} className="font-medium">Wrong network</p>
                 <p className="text-text-secondary text-sm text-center max-w-sm">
-                    Buoy needs to be connected to X Layer Testnet (chain ID {xLayerTestnet.id}) to read your position.
+                    Buoy needs X Layer Testnet (chain ID {xLayerTestnet.id}) to read your position.
                 </p>
                 <button
                     onClick={() => switchChain({ chainId: xLayerTestnet.id })}
                     disabled={isSwitching}
-                    className="font-sans font-medium bg-risk-medium text-background px-6 py-2 rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+                    className="font-sans font-bold px-6 py-2 rounded-full disabled:opacity-50"
+                    style={{ backgroundColor: "var(--risk-medium)", color: "#0B0620" }}
                 >
                     {isSwitching ? "Switching..." : "Switch to X Layer Testnet"}
                 </button>
+            </div>
+        );
+    }
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <p className="font-mono text-text-secondary animate-pulse">Reading your position...</p>
             </div>
         );
     }
@@ -123,102 +89,97 @@ export default function Dashboard() {
         return (
             <div className="min-h-screen flex items-center justify-center px-6">
                 <div className="max-w-md text-center">
-                    <p className="text-risk-critical font-medium mb-2">Something failed</p>
+                    <p style={{ color: "var(--risk-critical)" }} className="font-medium mb-2">Something failed</p>
                     <p className="text-text-secondary text-sm font-mono">{error}</p>
                 </div>
             </div>
         );
     }
 
-    if (stage === "checking-account") {
-        return (
-            <div className="min-h-screen flex items-center justify-center">
-                <p className="font-mono text-text-secondary animate-pulse">Checking smart account...</p>
-            </div>
-        );
-    }
-
-    if (stage === "needs-deploy") {
-        return (
-            <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6">
-                <p className="text-text-primary font-medium">No Buoy smart account yet</p>
-                <p className="text-text-secondary text-sm text-center max-w-md">
-                    Deploy your Buoy smart account to enable prepared, signable transactions.
-                    Predicted address: <span className="font-mono text-xs">{accountInfo?.predictedAddress}</span>
-                </p>
-                <button
-                    onClick={handleDeploy}
-                    disabled={isSending}
-                    className="font-sans font-medium bg-risk-low text-background px-6 py-2 rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
-                >
-                    {isSending ? "Confirm in wallet..." : "Deploy Smart Account"}
-                </button>
-                {sendError && <p className="text-risk-critical text-sm font-mono">{sendError.message}</p>}
-            </div>
-        );
-    }
-
-    if (stage === "deploying" || stage === "confirming") {
-        return (
-            <div className="min-h-screen flex items-center justify-center">
-                <p className="font-mono text-text-secondary animate-pulse">
-                    {stage === "deploying" ? "Deploying smart account..." : "Confirming on-chain..."}
-                </p>
-            </div>
-        );
-    }
-
-    if (stage === "analyzing") {
-        return (
-            <div className="min-h-screen px-6 py-12 max-w-4xl mx-auto">
-                <AgentStatusStrip isRunning={true} isComplete={false} />
-                <p className="font-mono text-text-secondary text-center animate-pulse">Analyzing position...</p>
-            </div>
-        );
-    }
-
     if (!result) return null;
+
+    const { position } = result;
+    const hasPosition = position.collateralAssets.length > 0 || position.debtAssets.length > 0;
 
     return (
         <div className="min-h-screen px-6 py-12 max-w-4xl mx-auto">
-            <p className="font-mono text-sm text-text-secondary mb-8">{address}</p>
-
-            <AgentStatusStrip isRunning={false} isComplete={true} />
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-panel border border-border rounded-xl p-6">
-                    <p className="text-text-secondary text-sm mb-2">Health Factor</p>
-                    <p className="font-mono text-4xl font-medium text-text-primary">
-                        {result.position.healthFactor?.toFixed(2) ?? "∞"}
-                    </p>
-                    <p className="text-sm mt-2" style={{ color: `var(--risk-${result.position.riskLevel.toLowerCase()})` }}>
-                        {result.position.riskLevel}
-                    </p>
-                </div>
-
-                <div className="bg-panel border border-border rounded-xl p-6">
-                    <p className="text-text-secondary text-sm mb-2">Collateral / Debt</p>
-                    <p className="font-mono text-2xl text-text-primary">
-                        ${result.position.totalCollateralUSD.toFixed(2)} / ${result.position.totalDebtUSD.toFixed(2)}
-                    </p>
-                </div>
-
-                <div className="bg-panel border border-border rounded-xl p-6 md:col-span-2">
-                    <p className="text-text-secondary text-sm mb-2">Explanation</p>
-                    <p className="text-text-primary leading-relaxed">{result.explanation}</p>
-                </div>
-
-                <div className="bg-panel border border-border rounded-xl p-6 md:col-span-2">
-                    <p className="text-text-secondary text-sm mb-2">Recommended Action</p>
-                    <p className="text-text-primary font-medium mb-1">{result.recommendedAction}</p>
-                    <p className="text-text-secondary text-sm">{result.actionRationale}</p>
-                </div>
-
-                <ExecutionPreview
-                    preparedUserOp={result.preparedUserOp as any}
-                    recommendedAction={result.recommendedAction}
-                />
+            <div className="flex items-center justify-between mb-8">
+                <p className="font-mono text-sm text-text-secondary">{address}</p>
+                <Link
+                    href="/settings"
+                    className="font-mono text-sm px-4 py-1.5 rounded-full glass-panel hover:opacity-80 transition-opacity"
+                >
+                    Settings
+                </Link>
             </div>
+
+            {!hasPosition ? (
+                <motion.div
+                    className="glass-panel rounded-2xl p-8 text-center"
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                >
+                    <p className="text-text-primary font-medium mb-2">No active position yet</p>
+                    <p className="text-text-secondary text-sm">
+                        Supply collateral or borrow on a supported pool, then come back — Buoy will start watching automatically.
+                    </p>
+                </motion.div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="md:col-span-1">
+                        <RiskGauge healthFactor={position.healthFactor} riskLevel={position.riskLevel} />
+                    </div>
+
+                    <div className="md:col-span-2 flex flex-col gap-4">
+                        <motion.div
+                            className="glass-panel rounded-2xl p-6"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ delay: 0.1 }}
+                        >
+                            <p className="text-text-secondary text-sm mb-2">Explanation</p>
+                            <p className="text-text-primary leading-relaxed">{result.explanation}</p>
+                        </motion.div>
+
+                        {result.recommendedAction !== "NONE" && (
+                            <motion.div
+                                className="glass-panel rounded-2xl p-6"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ delay: 0.15 }}
+                            >
+                                <p className="text-text-secondary text-sm mb-2">Recommended action</p>
+                                <p className="font-bold mb-1" style={{ color: "var(--brand-cyan)" }}>{result.recommendedAction}</p>
+                                <p className="text-text-secondary text-sm">{result.actionRationale}</p>
+                            </motion.div>
+                        )}
+                    </div>
+
+                    <div className="md:col-span-3">
+                        <p className="text-text-secondary text-sm mb-3 mt-2">Collateral</p>
+                        <div className="flex flex-col gap-2 mb-6">
+                            {position.collateralAssets.length === 0 ? (
+                                <p className="text-text-secondary text-sm font-mono">None</p>
+                            ) : (
+                                position.collateralAssets.map((a, i) => (
+                                    <AssetRow key={a.asset} symbol={a.symbol} usdValue={a.collateralUSD} type="collateral" index={i} />
+                                ))
+                            )}
+                        </div>
+
+                        <p className="text-text-secondary text-sm mb-3">Debt</p>
+                        <div className="flex flex-col gap-2">
+                            {position.debtAssets.length === 0 ? (
+                                <p className="text-text-secondary text-sm font-mono">None</p>
+                            ) : (
+                                position.debtAssets.map((a, i) => (
+                                    <AssetRow key={a.asset} symbol={a.symbol} usdValue={a.debtUSD} type="debt" index={i} />
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

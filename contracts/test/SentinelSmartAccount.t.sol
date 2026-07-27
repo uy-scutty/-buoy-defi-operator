@@ -47,29 +47,25 @@ contract SentinelSmartAccountTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
-   function test_ValidateUserOp_AcceptsCorrectOwnerSignature() public {
-    bytes memory callData = abi.encodeWithSignature(
-        "execute(address,uint256,bytes)", 
-        target, 
-        0, 
-        abi.encodeCall(Counter.increment, ())
-    );
+    function test_ValidateUserOp_AcceptsCorrectOwnerSignature() public {
+        bytes memory callData =
+            abi.encodeWithSignature("execute(address,uint256,bytes)", target, 0, abi.encodeCall(Counter.increment, ()));
 
-    PackedUserOperation memory userOp = _buildUserOp(callData);
-    userOp.signature = _sign(userOp);
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _sign(userOp);
 
-    PackedUserOperation[] memory ops = new PackedUserOperation[](1);
-    ops[0] = userOp;
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
 
-    address bundler = makeAddr("bundler");
-    address payable beneficiary = payable(makeAddr("beneficiary"));
+        address bundler = makeAddr("bundler");
+        address payable beneficiary = payable(makeAddr("beneficiary"));
 
-    vm.startPrank(bundler, bundler);
-    entryPoint.handleOps(ops, beneficiary);
-    vm.stopPrank();
+        vm.startPrank(bundler, bundler);
+        entryPoint.handleOps(ops, beneficiary);
+        vm.stopPrank();
 
-    assertEq(Counter(target).count(), 1);
-}
+        assertEq(Counter(target).count(), 1);
+    }
 
     function test_ValidateUserOp_RejectsWrongSigner() public {
         uint256 wrongKey = 0xBAD;

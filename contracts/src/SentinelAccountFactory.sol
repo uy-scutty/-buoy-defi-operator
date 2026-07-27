@@ -32,8 +32,7 @@ contract SentinelAccountFactory {
             return SentinelSmartAccount(payable(predicted));
         }
 
-        SentinelSmartAccount account =
-            new SentinelSmartAccount{salt: bytes32(salt)}(entryPoint, owner);
+        SentinelSmartAccount account = new SentinelSmartAccount{salt: bytes32(salt)}(entryPoint, owner);
 
         emit AccountCreated(owner, address(account), salt);
         return account;
@@ -43,23 +42,13 @@ contract SentinelAccountFactory {
     ///         WITHOUT deploying anything — used by the backend to return
     ///         `predictedAddress` before the user has sent any transaction.
     function getAddress(address owner, uint256 salt) public view returns (address) {
-        bytes memory creationCode = abi.encodePacked(
-            type(SentinelSmartAccount).creationCode,
-            abi.encode(entryPoint, owner)
-        );
+        bytes memory creationCode =
+            abi.encodePacked(type(SentinelSmartAccount).creationCode, abi.encode(entryPoint, owner));
 
         return _computeCreate2Address(bytes32(salt), keccak256(creationCode));
     }
 
     function _computeCreate2Address(bytes32 salt, bytes32 initCodeHash) internal view returns (address) {
-        return address(
-            uint160(
-                uint256(
-                    keccak256(
-                        abi.encodePacked(bytes1(0xff), address(this), salt, initCodeHash)
-                    )
-                )
-            )
-        );
+        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, initCodeHash)))));
     }
 }

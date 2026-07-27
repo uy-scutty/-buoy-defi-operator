@@ -1,24 +1,32 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0B0E11;
-  --panel: #14181D;
-  --border: #242B33;
-  --text-primary: #E8ECEF;
-  --text-secondary: #8B96A3;
+  --background: #150C33;
+--background-secondary: #241653;
+  --panel: rgba(255, 255, 255, 0.04);
+  --panel-border: rgba(139, 92, 246, 0.15);
+  --text-primary: #F4F2FF;
+  --text-secondary: #A79FC9;
 
-  --risk-low: #2DD4A7;
-  --risk-medium: #E8B339;
-  --risk-high: #E8823D;
-  --risk-critical: #E8493D;
+  --brand-violet: #8B5CF6;
+  --brand-cyan: #22D3EE;
+
+  --risk-low: #34D399;
+  --risk-medium: #FBBF24;
+  --risk-high: #FB7185;
+  --risk-critical: #F43F5E;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-secondary: var(--background-secondary);
   --color-panel: var(--panel);
-  --color-border: var(--border);
+  --color-panel-border: var(--panel-border);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
+
+  --color-brand-violet: var(--brand-violet);
+  --color-brand-cyan: var(--brand-cyan);
 
   --color-risk-low: var(--risk-low);
   --color-risk-medium: var(--risk-medium);
@@ -31,7 +39,15 @@
 }
 
 body {
-  background: var(--background);
+  background: radial-gradient(ellipse at top, var(--background-secondary) 0%, var(--background) 60%);
   color: var(--text-primary);
   font-family: var(--font-sans);
+  min-height: 100vh;
+}
+
+.glass-panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }

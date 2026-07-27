@@ -21,6 +21,16 @@
         "internalType": "bool"
       },
       {
+        "name": "symbol",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "decimals",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
         "name": "priceUSD",
         "type": "uint256",
         "internalType": "uint256"
@@ -64,6 +74,16 @@
         "name": "asset",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "symbol",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "decimals",
+        "type": "uint8",
+        "internalType": "uint8"
       },
       {
         "name": "priceUSD",
@@ -178,6 +198,62 @@
   },
   {
     "type": "function",
+    "name": "getUserPositions",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple[]",
+        "internalType": "struct MockAavePool.AssetPosition[]",
+        "components": [
+          {
+            "name": "asset",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "symbol",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "decimals",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "collateralAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "collateralUSD",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "debtAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "debtUSD",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "owner",
     "inputs": [],
     "outputs": [
@@ -202,6 +278,11 @@
         "name": "amount",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "onBehalfOf",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -253,6 +334,11 @@
         "name": "amount",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "onBehalfOf",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -267,6 +353,12 @@
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "symbol",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
       },
       {
         "name": "priceUSD",

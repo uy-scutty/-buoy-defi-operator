@@ -25,8 +25,8 @@ export async function createAnalysis(req: Request, res: Response) {
             totalCollateral: result.risk.totalCollateralUSD,
             totalDebt: result.risk.totalDebtUSD,
             healthFactor: result.risk.healthFactor ?? -1,
-            loanToValue: result.risk.ltvPct,
-            liquidationThreshold: result.risk.liquidationThresholdPct,
+            loanToValue: 0, // deprecated single-pair field, kept for schema compat — see riskSummary for real per-asset data
+            liquidationThreshold: 0, // deprecated single-pair field, kept for schema compat — see riskSummary for real per-asset data
             riskSummary: JSON.stringify(result.risk),
             researchSummary: JSON.stringify(result.research),
             explanation: result.explanation,

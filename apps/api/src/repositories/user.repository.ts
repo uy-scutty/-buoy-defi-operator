@@ -23,4 +23,10 @@ export const userRepository = {
             data: { smartAccount },
         });
     },
+    updateSettings(userId: string, data: { automationEnabled?: boolean; healthFactorThreshold?: number }) {
+        return prisma.user.update({
+            where: { id: userId },
+            data,
+        });
+    },
 };

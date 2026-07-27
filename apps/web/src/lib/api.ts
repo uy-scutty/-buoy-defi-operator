@@ -1,13 +1,24 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
 
+export interface AssetPosition {
+    asset: string;
+    symbol: string;
+    decimals: number;
+    collateralAmount: string;
+    collateralUSD: number;
+    debtAmount: string;
+    debtUSD: number;
+}
+
 export interface AnalysisResult {
     analysisId: string;
     position: {
+        collateralAssets: AssetPosition[];
+        debtAssets: AssetPosition[];
         totalCollateralUSD: number;
         totalDebtUSD: number;
-        availableBorrowsUSD: number;
-        liquidationThresholdPct: number;
         ltvPct: number;
+        liquidationThresholdPct: number;
         healthFactor: number | null;
         riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
     };
@@ -17,7 +28,7 @@ export interface AnalysisResult {
         sources: string[];
     };
     explanation: string;
-    recommendedAction: "REPAY" | "SUPPLY";
+    recommendedAction: "REPAY" | "SUPPLY" | "NONE";
     actionRationale: string;
     preparedUserOp: unknown;
 }
@@ -56,5 +67,26 @@ export async function getDeployAccountInfo(walletAddress: string): Promise<Deplo
         throw new Error(errorBody.message || `Deploy-account request failed: ${res.status}`);
     }
 
+    return res.json();
+}
+
+export interface Settings {
+    automationEnabled: boolean;
+    healthFactorThreshold: number;
+}
+
+export async function getSettings(walletAddress: string): Promise<Settings> {
+    const res = await fetch(`${API_BASE}/settings?walletAddress=${walletAddress}`);
+    if (!res.ok) throw new Error(`Failed to load settings: ${res.status}`);
+    return res.json();
+}
+
+export async function updateSettings(walletAddress: string, updates: Partial<Settings>): Promise<Settings> {
+    const res = await fetch(`${API_BASE}/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress, ...updates }),
+    });
+    if (!res.ok) throw new Error(`Failed to update settings: ${res.status}`);
     return res.json();
 }

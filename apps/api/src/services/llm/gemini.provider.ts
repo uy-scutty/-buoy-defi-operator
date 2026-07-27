@@ -24,9 +24,9 @@ export async function generateExplanation(risk: RiskOutput, research: ResearchOu
         contents: buildPrompt(risk, research),
         config: {
             systemInstruction:
-                "You are Sentinel, an AI DeFi operations engineer. Explain a user's lending position risk in clear, plain English — like a calm, competent operations engineer briefing a colleague, not a chatbot. Reference the actual numbers given. Keep it to 2-3 sentences. Be direct and confident; this is a risk briefing, not investment advice, so don't hedge excessively.",
+                "You are Buoy, an AI DeFi operations engineer. Explain a user's lending position risk in clear, plain English — like a calm, competent operations engineer briefing a colleague, not a chatbot. The user may hold MULTIPLE collateral and debt assets — reference the specific assets by name where it helps, not just totals. Keep it to 2-4 sentences. Be direct and confident; this is a risk briefing, not investment advice, so don't hedge excessively.",
             temperature: 0.4,
-            maxOutputTokens: 200,
+            maxOutputTokens: 250,
         },
     });
 
@@ -36,20 +36,34 @@ export async function generateExplanation(risk: RiskOutput, research: ResearchOu
 }
 
 function buildPrompt(risk: RiskOutput, research: ResearchOutput): string {
+    if (risk.collateralAssets.length === 0 && risk.debtAssets.length === 0) {
+        return "This wallet has no active collateral or debt position yet. Write one short sentence welcoming the user and explaining that Buoy will begin monitoring once they supply collateral or borrow.";
+    }
+
     const hfText =
         risk.healthFactor === null
             ? "no active debt (effectively infinite Health Factor)"
             : `a Health Factor of ${risk.healthFactor.toFixed(2)}`;
 
+    const collateralList = risk.collateralAssets.length > 0
+        ? risk.collateralAssets.map((a) => `${a.symbol} ($${a.collateralUSD.toFixed(2)})`).join(", ")
+        : "none";
+
+    const debtList = risk.debtAssets.length > 0
+        ? risk.debtAssets.map((a) => `${a.symbol} ($${a.debtUSD.toFixed(2)})`).join(", ")
+        : "none";
+
     return `Position summary:
+- Collateral assets: ${collateralList}
+- Debt assets: ${debtList}
 - Total Collateral: $${risk.totalCollateralUSD.toFixed(2)}
 - Total Debt: $${risk.totalDebtUSD.toFixed(2)}
-- Loan-to-Value: ${risk.ltvPct}%
-- Liquidation Threshold: ${risk.liquidationThresholdPct}%
+- Weighted Loan-to-Value: ${risk.ltvPct.toFixed(1)}%
+- Weighted Liquidation Threshold: ${risk.liquidationThresholdPct.toFixed(1)}%
 - Health Factor: ${hfText}
 - Risk Level: ${risk.riskLevel}
 
 Additional context: ${research.marketNote}
 
-Explain this position's risk in plain English and note what matters most right now.`;
+Explain this position's risk in plain English, mentioning the specific assets involved, and note what matters most right now.`;
 }

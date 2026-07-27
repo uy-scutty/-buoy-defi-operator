@@ -1,93 +1,110 @@
 import { ethers } from "ethers";
 import { RiskOutput } from "./risk.service";
+import { AssetPosition } from "../positionDiscovery.service";
 import { buildUnsignedUserOp, UnsignedUserOperation } from "../../wallet/userOperation";
+import { env } from "../../config/env";
 import mockAavePoolAbi from "../../config/abi/MockAavePool.json";
-import {
-    DEMO_WETH_ADDRESS,
-    DEMO_USDC_ADDRESS,
-    WETH_LIQUIDATION_THRESHOLD_PCT,
-    TARGET_HEALTH_FACTOR,
-} from "../../config/assets";
+
+export type RecommendedAction = "REPAY" | "SUPPLY" | "NONE";
 
 export interface ExecutionOutput {
-    recommendedAction: "REPAY" | "SUPPLY";
+    recommendedAction: RecommendedAction;
+    targetAsset: string | null; // symbol, for display
     targetAmountUSD: number;
-    preparedUserOp: UnsignedUserOperation | null; // null if smartAccountAddress not yet known
+    preparedUserOp: UnsignedUserOperation | null;
 }
 
+const TARGET_HEALTH_FACTOR = 1.5;
 const mockAavePoolInterface = new ethers.Interface(mockAavePoolAbi as any);
 
 /**
- * Execution Agent: decides REPAY vs SUPPLY based on the Risk Agent's output,
- * computes the amount needed to restore Health Factor to TARGET_HEALTH_FACTOR,
- * and builds real calldata targeting MockAavePool — wrapped for execution via
- * the user's SentinelSmartAccount. Returns an UNSIGNED UserOperation only.
- *
- * smartAccountAddress is optional: if the user hasn't deployed their smart
- * account yet, we still compute and return the recommendation and the inner
- * calldata's intent, but preparedUserOp is null (nothing to wrap/sign yet).
+ * Execution Agent: chooses which asset to act on based on the user's ACTUAL
+ * position — the largest debt to repay, or largest existing collateral to
+ * top up — never a fixed hardcoded asset. If the user holds no position at
+ * all, returns NONE rather than guessing an asset to recommend, since
+ * there's no general price-lookup for assets the user has never touched.
  */
 export async function runExecutionAgent(
     risk: RiskOutput,
     smartAccountAddress: string | null
 ): Promise<ExecutionOutput> {
-    const { action, amountUSD } = computeRecommendedAction(risk);
+    const decision = computeRecommendedAction(risk);
+
+    if (decision.action === "NONE" || !decision.asset) {
+        return { recommendedAction: "NONE", targetAsset: null, targetAmountUSD: 0, preparedUserOp: null };
+    }
 
     let preparedUserOp: UnsignedUserOperation | null = null;
 
     if (smartAccountAddress) {
-        const innerCallData = buildPoolCallData(action, amountUSD);
+        const innerCallData = buildPoolCallData(decision.action, decision.amountUSD, decision.asset, smartAccountAddress);
         const outerCallData = wrapForSmartAccountExecute(innerCallData);
         preparedUserOp = await buildUnsignedUserOp(smartAccountAddress, outerCallData);
     }
 
     return {
-        recommendedAction: action,
-        targetAmountUSD: amountUSD,
+        recommendedAction: decision.action,
+        targetAsset: decision.asset.symbol,
+        targetAmountUSD: decision.amountUSD,
         preparedUserOp,
     };
 }
 
-function computeRecommendedAction(risk: RiskOutput): { action: "REPAY" | "SUPPLY"; amountUSD: number } {
-    const liqThresholdFraction = risk.liquidationThresholdPct / 100;
+function computeRecommendedAction(
+    risk: RiskOutput
+): { action: "REPAY"; amountUSD: number; asset: AssetPosition }
+    | { action: "SUPPLY"; amountUSD: number; asset: AssetPosition }
+    | { action: "NONE"; amountUSD: 0; asset: null } {
+    if (risk.totalDebtUSD > 0 && risk.debtAssets.length > 0) {
+        const largestDebt = [...risk.debtAssets].sort((a, b) => b.debtUSD - a.debtUSD)[0];
 
-    if (risk.totalDebtUSD > 0) {
-        // REPAY path: find target debt such that HF reaches TARGET_HEALTH_FACTOR,
-        // then repay the difference.
+        const liqThresholdFraction = risk.liquidationThresholdPct / 100;
         const targetDebtUSD = (risk.totalCollateralUSD * liqThresholdFraction) / TARGET_HEALTH_FACTOR;
-        const repayAmountUSD = Math.max(risk.totalDebtUSD - targetDebtUSD, 0);
-        return { action: "REPAY", amountUSD: round2(repayAmountUSD) };
+        const repayAmountUSD = Math.min(
+            Math.max(risk.totalDebtUSD - targetDebtUSD, 0),
+            largestDebt.debtUSD
+        );
+
+        if (repayAmountUSD === 0) {
+            return { action: "NONE", amountUSD: 0, asset: null };
+        }
+
+        return { action: "REPAY", amountUSD: round2(repayAmountUSD), asset: largestDebt };
+    }
+    if (risk.collateralAssets.length > 0) {
+        const largestCollateral = [...risk.collateralAssets].sort((a, b) => b.collateralUSD - a.collateralUSD)[0];
+        const supplyAmountUSD = largestCollateral.collateralUSD * 0.1;
+        return { action: "SUPPLY", amountUSD: round2(supplyAmountUSD), asset: largestCollateral };
     }
 
-    // SUPPLY path: no debt currently, but we still recommend building a
-    // buffer — supply enough to noticeably improve the collateral base.
-    // Simplified MVP heuristic: recommend 10% of existing collateral as
-    // additional buffer (or a fixed small amount if collateral is zero).
-    const supplyAmountUSD = risk.totalCollateralUSD > 0 ? risk.totalCollateralUSD * 0.1 : 100;
-    return { action: "SUPPLY", amountUSD: round2(supplyAmountUSD) };
+    return { action: "NONE", amountUSD: 0, asset: null };
 }
 
-function buildPoolCallData(action: "REPAY" | "SUPPLY", amountUSD: number): string {
-    if (action === "REPAY") {
-        // Debt asset is USDC, $1 price, so USD amount maps directly to token amount.
-        const amountRaw = ethers.parseUnits(amountUSD.toFixed(6), 18);
-        return mockAavePoolInterface.encodeFunctionData("repay", [DEMO_USDC_ADDRESS, amountRaw]);
-    }
+function buildPoolCallData(
+    action: "REPAY" | "SUPPLY",
+    amountUSD: number,
+    asset: AssetPosition,
+    onBehalfOf: string
+): string {
+    const rawAmountHeld = action === "REPAY" ? BigInt(asset.debtAmount) : BigInt(asset.collateralAmount);
+    const usdValueHeld = action === "REPAY" ? asset.debtUSD : asset.collateralUSD;
+    const pricePerToken = usdValueHeld / (Number(rawAmountHeld) / 10 ** asset.decimals);
 
-    // Collateral asset is WETH, $2000 price — convert USD amount to WETH units.
-    const wethAmount = amountUSD / 2000;
-    const amountRaw = ethers.parseUnits(wethAmount.toFixed(6), 18);
-    return mockAavePoolInterface.encodeFunctionData("supply", [DEMO_WETH_ADDRESS, amountRaw]);
+    const tokenAmount = amountUSD / pricePerToken;
+    const amountRaw = ethers.parseUnits(tokenAmount.toFixed(asset.decimals > 6 ? 6 : asset.decimals), asset.decimals);
+
+    return mockAavePoolInterface.encodeFunctionData(action === "REPAY" ? "repay" : "supply", [
+        asset.asset,
+        amountRaw,
+        onBehalfOf,
+    ]);
 }
 
-/** Wraps inner pool calldata into a call to SentinelSmartAccount.execute(target, value, data). */
 function wrapForSmartAccountExecute(innerCallData: string): string {
     const smartAccountInterface = new ethers.Interface([
         "function execute(address target, uint256 value, bytes data)",
     ]);
-    // Target is always MockAavePool for this MVP — a real deployment would
-    // pass the actual pool address here, sourced from env/config.
-    const targetPoolAddress = process.env.MOCK_AAVE_POOL_ADDRESS ?? ethers.ZeroAddress;
+    const targetPoolAddress = env.MOCK_AAVE_POOL_ADDRESS ?? ethers.ZeroAddress;
     return smartAccountInterface.encodeFunctionData("execute", [targetPoolAddress, 0, innerCallData]);
 }
 

@@ -6,90 +6,118 @@ import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {MockAavePool} from "../src/MockAavePool.sol";
 import {SentinelAccountFactory} from "../src/SentinelAccountFactory.sol";
 import {AgentRegistry} from "../src/AgentRegistry.sol";
+import {BuoyVault} from "../src/BuoyVault.sol";
+import {TestERC20} from "../src/TestERC20.sol";
 
-/// @notice Deploys all four Sentinel contracts to X Layer testnet and wires
-///         them together: configures demo assets on MockAavePool, registers
-///         Sentinel's four AI agents on AgentRegistry, and seeds one demo
-///         wallet with a near-liquidation position for the hackathon demo.
-/// @dev Does NOT deploy an EntryPoint — the canonical v0.7 singleton at
-///      0x0000000071727De22E5E9d8BAf0edAc6f37da032 is already live on X Layer
-///      testnet (confirmed via `cast code` before writing this script).
+/// @notice Deploys all Buoy contracts, real mintable test tokens, and seeds
+///         a genuinely multi-asset demo position (two collateral assets,
+///         two debt assets) to prove the system reasons about arbitrary
+///         positions, not one hardcoded pair.
 contract Deploy is Script {
     address constant ENTRY_POINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+    address constant AUTOMATION_ADDRESS = 0x8C348594ABf5920aDFf51575C74ff4FE52c84Ffb;
 
-    // Demo asset addresses — placeholders standing in for WETH/USDC on X Layer
-    // testnet. Replace with real testnet token addresses once obtained; using
-    // fixed placeholder addresses only works because MockAavePool tracks
-    // balances internally rather than transferring real ERC-20 tokens (see
-    // note in MockAavePool.sol — no token transfers occur in supply/repay/borrow
-    // for MVP simplicity, only internal accounting).
-    address constant DEMO_WETH = address(0x1);
-    address constant DEMO_USDC = address(0x2);
+    address deployer;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
+        deployer = vm.addr(deployerPrivateKey);
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // 1. Deploy MockAavePool and configure demo assets
-        MockAavePool pool = new MockAavePool();
-        pool.configureAsset(DEMO_WETH, 2000e18, 8000, 8500); // $2000, 80% LTV, 85% liq threshold
-        pool.configureAsset(DEMO_USDC, 1e18, 0, 0);          // $1, not usable as collateral
-
-        // Seed the deployer's own wallet with a near-liquidation position
-        // (HF = 1.0 exactly) for demo purposes: 1 WETH collateral, 1700 USDC debt.
-        pool.seedPosition(deployer, DEMO_WETH, 1e18, DEMO_USDC, 1700e18);
-
-        // 2. Deploy SentinelAccountFactory, pointed at the existing EntryPoint
+        (address weth, address wbtc, address usdc, address dai) = _deployTokens();
+        MockAavePool pool = _deployAndConfigurePool(weth, wbtc, usdc, dai);
         SentinelAccountFactory factory = new SentinelAccountFactory(IEntryPoint(ENTRY_POINT));
-
-        // 3. Deploy AgentRegistry and register Sentinel's four agents
-        AgentRegistry registry = new AgentRegistry();
-
-        uint256 supervisorId = registry.registerAgent(
-            "Supervisor Agent",
-            "Coordinates Risk, Research, and Execution agents; synthesizes the final explanation and recommendation.",
-            deployer,
-            "ipfs://sentinel/agents/supervisor/capabilities.json",
-            "ipfs://sentinel/agents/supervisor/metadata.json"
-        );
-        uint256 riskId = registry.registerAgent(
-            "Risk Agent",
-            "Computes Health Factor, LTV, Liquidation Threshold, Total Collateral, and Total Debt from on-chain position data.",
-            deployer,
-            "ipfs://sentinel/agents/risk/capabilities.json",
-            "ipfs://sentinel/agents/risk/metadata.json"
-        );
-        uint256 researchId = registry.registerAgent(
-            "Research Agent",
-            "Gathers protocol documentation, market context, and asset risk notes to support the Supervisor's explanation.",
-            deployer,
-            "ipfs://sentinel/agents/research/capabilities.json",
-            "ipfs://sentinel/agents/research/metadata.json"
-        );
-        uint256 executionId = registry.registerAgent(
-            "Execution Agent",
-            "Builds unsigned UserOperation calldata for the Supervisor's recommended action (repay or supply).",
-            deployer,
-            "ipfs://sentinel/agents/execution/capabilities.json",
-            "ipfs://sentinel/agents/execution/metadata.json"
-        );
+        AgentRegistry registry = _deployAndRegisterAgents();
+        BuoyVault vault = new BuoyVault(AUTOMATION_ADDRESS);
 
         vm.stopBroadcast();
 
-       console.log("=== Sentinel Protocol Operator - X Layer Testnet Deployment ===");
+        _logResults(pool, factory, registry, vault, weth, wbtc, usdc, dai);
+    }
+
+    function _deployTokens() internal returns (address weth, address wbtc, address usdc, address dai) {
+        TestERC20 wethToken = new TestERC20("Test WETH", "WETH", 18);
+        TestERC20 wbtcToken = new TestERC20("Test WBTC", "WBTC", 8);
+        TestERC20 usdcToken = new TestERC20("Test USDC", "USDC", 6);
+        TestERC20 daiToken = new TestERC20("Test DAI", "DAI", 18);
+
+        usdcToken.mint(deployer, 5000e6);
+        daiToken.mint(deployer, 5000e18);
+        wethToken.mint(deployer, 5e18);
+        wbtcToken.mint(deployer, 0.5e8);
+
+        return (address(wethToken), address(wbtcToken), address(usdcToken), address(daiToken));
+    }
+
+    function _deployAndConfigurePool(address weth, address wbtc, address usdc, address dai)
+        internal
+        returns (MockAavePool pool)
+    {
+        pool = new MockAavePool();
+        pool.configureAsset(weth, "WETH", 18, 2000e18, 8000, 8500);
+        pool.configureAsset(wbtc, "WBTC", 8, 60000e18, 7500, 8000);
+        pool.configureAsset(usdc, "USDC", 6, 1e18, 0, 0);
+        pool.configureAsset(dai, "DAI", 18, 1e18, 0, 0);
+
+        pool.seedPosition(deployer, weth, 1e18, usdc, 1200e6);
+        pool.seedPosition(deployer, wbtc, 0.02e8, dai, 500e18);
+    }
+
+    function _deployAndRegisterAgents() internal returns (AgentRegistry registry) {
+        registry = new AgentRegistry();
+
+        registry.registerAgent(
+            "Supervisor Agent",
+            "Coordinates Risk, Research, and Execution agents; synthesizes the final explanation and recommendation.",
+            deployer,
+            "ipfs://buoy/agents/supervisor/capabilities.json",
+            "ipfs://buoy/agents/supervisor/metadata.json"
+        );
+        registry.registerAgent(
+            "Risk Agent",
+            "Computes Health Factor and a full multi-asset position breakdown from on-chain data.",
+            deployer,
+            "ipfs://buoy/agents/risk/capabilities.json",
+            "ipfs://buoy/agents/risk/metadata.json"
+        );
+        registry.registerAgent(
+            "Research Agent",
+            "Gathers protocol documentation and market context to support the Supervisor's explanation.",
+            deployer,
+            "ipfs://buoy/agents/research/capabilities.json",
+            "ipfs://buoy/agents/research/metadata.json"
+        );
+        registry.registerAgent(
+            "Execution Agent",
+            "Builds prepared transactions and, when authorized, executes protective actions via the Buoy Vault.",
+            deployer,
+            "ipfs://buoy/agents/execution/capabilities.json",
+            "ipfs://buoy/agents/execution/metadata.json"
+        );
+    }
+
+    function _logResults(
+        MockAavePool pool,
+        SentinelAccountFactory factory,
+        AgentRegistry registry,
+        BuoyVault vault,
+        address weth,
+        address wbtc,
+        address usdc,
+        address dai
+    ) internal view {
+        console.log("=== Buoy - X Layer Testnet Deployment ===");
         console.log("Deployer:", deployer);
         console.log("MockAavePool:", address(pool));
         console.log("SentinelAccountFactory:", address(factory));
         console.log("AgentRegistry:", address(registry));
+        console.log("BuoyVault:", address(vault));
         console.log("EntryPoint (existing):", ENTRY_POINT);
-        console.log("Supervisor Agent ID:", supervisorId);
-        console.log("Risk Agent ID:", riskId);
-        console.log("Research Agent ID:", researchId);
-        console.log("Execution Agent ID:", executionId);
+        console.log("Test WETH:", weth);
+        console.log("Test WBTC:", wbtc);
+        console.log("Test USDC:", usdc);
+        console.log("Test DAI:", dai);
+        console.log("Automation Address:", AUTOMATION_ADDRESS);
     }
 }
-
-
-

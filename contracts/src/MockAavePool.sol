@@ -15,14 +15,26 @@ contract MockAavePool {
 
     struct AssetConfig {
         bool supported;
-        uint256 priceUSD; // price scaled 1e18 (fixed, no oracle — demo only)
-        uint256 ltvBps; // loan-to-value, basis points (e.g. 8000 = 80%)
-        uint256 liquidationThresholdBps; // basis points (e.g. 8500 = 85%)
+        string symbol;
+        uint8 decimals;
+        uint256 priceUSD;
+        uint256 ltvBps;
+        uint256 liquidationThresholdBps;
     }
 
     struct UserPosition {
         mapping(address => uint256) collateral; // asset => amount (asset's native decimals, assumed 18 here)
         mapping(address => uint256) debt; // asset => amount
+    }
+
+    struct AssetPosition {
+        address asset;
+        string symbol;
+        uint8 decimals;
+        uint256 collateralAmount;
+        uint256 collateralUSD;
+        uint256 debtAmount;
+        uint256 debtUSD;
     }
 
     address public owner;
@@ -39,7 +51,9 @@ contract MockAavePool {
     event Supply(address indexed asset, address indexed user, uint256 amount);
     event Repay(address indexed asset, address indexed user, uint256 amount);
     event Borrow(address indexed asset, address indexed user, uint256 amount);
-    event AssetConfigured(address indexed asset, uint256 priceUSD, uint256 ltvBps, uint256 liquidationThresholdBps);
+    event AssetConfigured(
+        address indexed asset, string symbol, uint256 priceUSD, uint256 ltvBps, uint256 liquidationThresholdBps
+    );
 
     // ---------------------------------------------------------------------
     // Errors
@@ -78,15 +92,24 @@ contract MockAavePool {
     // ---------------------------------------------------------------------
 
     /// @notice Registers or updates an asset's demo price and risk parameters.
-    function configureAsset(address asset, uint256 priceUSD, uint256 ltvBps, uint256 liquidationThresholdBps)
-        external
-        onlyOwner
-    {
+    function configureAsset(
+        address asset,
+        string calldata symbol,
+        uint8 decimals,
+        uint256 priceUSD,
+        uint256 ltvBps,
+        uint256 liquidationThresholdBps
+    ) external onlyOwner {
         assets[asset] = AssetConfig({
-            supported: true, priceUSD: priceUSD, ltvBps: ltvBps, liquidationThresholdBps: liquidationThresholdBps
+            supported: true,
+            symbol: symbol,
+            decimals: decimals,
+            priceUSD: priceUSD,
+            ltvBps: ltvBps,
+            liquidationThresholdBps: liquidationThresholdBps
         });
         _trackAsset(asset);
-        emit AssetConfigured(asset, priceUSD, ltvBps, liquidationThresholdBps);
+        emit AssetConfigured(asset, symbol, priceUSD, ltvBps, liquidationThresholdBps);
     }
 
     /// @notice Owner-only helper to directly seed a user's position for demo scenarios
@@ -109,20 +132,24 @@ contract MockAavePool {
     // Core actions (mirror Aave V3 Pool naming)
     // ---------------------------------------------------------------------
 
-    /// @notice Deposit collateral into the pool.
-    function supply(address asset, uint256 amount) external nonZero(amount) {
+    /// @notice Deposit collateral into the pool, on behalf of any address.
+    /// @dev Matches real Aave's onBehalfOf pattern — permissionless, since
+    ///      supplying collateral for someone else can only help them.
+    function supply(address asset, uint256 amount, address onBehalfOf) external nonZero(amount) {
         if (!assets[asset].supported) revert AssetNotSupported();
-        positions[msg.sender].collateral[asset] += amount;
-        emit Supply(asset, msg.sender, amount);
+        positions[onBehalfOf].collateral[asset] += amount;
+        emit Supply(asset, onBehalfOf, amount);
     }
 
-    /// @notice Repay outstanding debt.
-    function repay(address asset, uint256 amount) external nonZero(amount) {
+    /// @notice Repay debt on the pool, on behalf of any address.
+    /// @dev Matches real Aave's onBehalfOf pattern — permissionless, since
+    ///      repaying someone else's debt can only help them.
+    function repay(address asset, uint256 amount, address onBehalfOf) external nonZero(amount) {
         if (!assets[asset].supported) revert AssetNotSupported();
-        uint256 currentDebt = positions[msg.sender].debt[asset];
+        uint256 currentDebt = positions[onBehalfOf].debt[asset];
         if (currentDebt < amount) revert InsufficientDebt();
-        positions[msg.sender].debt[asset] = currentDebt - amount;
-        emit Repay(asset, msg.sender, amount);
+        positions[onBehalfOf].debt[asset] = currentDebt - amount;
+        emit Repay(asset, onBehalfOf, amount);
     }
 
     /// @notice Borrow against existing collateral.
@@ -174,9 +201,68 @@ contract MockAavePool {
         return positions[user].debt[asset];
     }
 
+    /// @notice Returns a breakdown of exactly which assets a user holds as
+    ///         collateral and/or debt, with amounts in both raw and USD terms.
+    /// @dev This is the real "position discovery" primitive the backend needs —
+    ///      replacing any assumption about which specific assets a user holds.
+    ///      Mirrors the spirit of Aave's per-reserve position data, simplified
+    ///      for the mock's demo asset list.
+    function getUserPositions(address user) external view returns (AssetPosition[] memory) {
+        address[] memory list = _demoAssetList();
+
+        uint256 count;
+        for (uint256 i = 0; i < list.length; i++) {
+            if (positions[user].collateral[list[i]] > 0 || positions[user].debt[list[i]] > 0) {
+                count++;
+            }
+        }
+
+        AssetPosition[] memory result = new AssetPosition[](count);
+        uint256 idx;
+
+        for (uint256 i = 0; i < list.length; i++) {
+            address asset = list[i];
+            uint256 collateralAmount = positions[user].collateral[asset];
+            uint256 debtAmount = positions[user].debt[asset];
+
+            if (collateralAmount > 0 || debtAmount > 0) {
+                AssetConfig memory cfg = assets[asset];
+                result[idx] = AssetPosition({
+                    asset: asset,
+                    symbol: cfg.symbol,
+                    decimals: cfg.decimals,
+                    collateralAmount: collateralAmount,
+                    collateralUSD: _toUSD(collateralAmount, cfg),
+                    debtAmount: debtAmount,
+                    debtUSD: _toUSD(debtAmount, cfg)
+                });
+                idx++;  // ← Fixed: increment index after assignment
+            }
+        }
+
+        return result;
+    }
+
     // ---------------------------------------------------------------------
     // Internal helpers
     // ---------------------------------------------------------------------
+
+    /// @dev Converts a raw token amount (in its own native decimals) to a USD
+    ///      value, scaled 1e18. Centralizes decimal normalization so every
+    ///      asset — regardless of its own decimals (e.g. WBTC's 8, USDC's 6,
+    ///      WETH's 18) — is valued correctly and consistently.
+    function _toUSD(uint256 rawAmount, AssetConfig memory cfg) internal pure returns (uint256) {
+        if (cfg.decimals == 18) {
+            return (rawAmount * cfg.priceUSD) / 1e18;  // Note: priceUSD is already scaled; adjust if needed
+        } else if (cfg.decimals < 18) {
+            uint256 normalized = rawAmount * (10 ** (18 - cfg.decimals));
+            return (normalized * cfg.priceUSD) / 1e18;
+        } else {
+            uint256 normalized = rawAmount / (10 ** (cfg.decimals - 18));
+            return (normalized * cfg.priceUSD) / 1e18;
+        }
+    }
+
 
     /// @dev Weighted-average LTV and liquidation threshold across a fixed demo asset set.
     ///      NOTE: iterating a fixed small asset list is acceptable here only because the
@@ -197,7 +283,7 @@ contract MockAavePool {
             if (amount == 0) continue;
 
             AssetConfig memory cfg = assets[asset];
-            uint256 valueUSD = (amount * cfg.priceUSD) / 1e18;
+            uint256 valueUSD = _toUSD(amount, cfg);
 
             totalUSD += valueUSD;
             weightedLiqSum += valueUSD * cfg.liquidationThresholdBps;
@@ -216,7 +302,7 @@ contract MockAavePool {
             address asset = list[i];
             uint256 amount = positions[user].debt[asset];
             if (amount == 0) continue;
-            totalUSD += (amount * assets[asset].priceUSD) / 1e18;
+            totalUSD += _toUSD(amount, assets[asset]);
         }
     }
 
